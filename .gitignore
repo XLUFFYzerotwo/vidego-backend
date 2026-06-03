@@ -1,0 +1,27 @@
+# ── 构建产物 ──
+target/
+*.class
+*.jar
+*.war
+
+# ── IDE ──
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+.vscode/
+
+# ── 运行时 ──
+logs/
+*.log
+*.pid
+.DS_Store
+Thumbs.db
+
+# ── 环境配置（含数据库密码、JWT密钥、MinIO密钥） ──
+application-dev.yml
+application-prod.yml
+
+# ── Maven ──
+dependency-reduced-pom.xml
