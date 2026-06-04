@@ -90,7 +90,6 @@ public class UserServiceImpl implements UserService {
         user.setStatus(1);
         user.setFollowerCount(0);
         user.setFollowingCount(0);
-        user.setLikeCount(0);
         user.setVideoCount(0);
         userMapper.insert(user);
 
@@ -281,6 +280,8 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public PageResult<VideoVO> getUserVideos(Long userId, int page, int size) {
+        // 限制最大翻页深度
+        page = Math.min(page, 100);
         Page<Video> videoPage = videoMapper.selectPage(
                 new Page<>(page, size),
                 new LambdaQueryWrapper<Video>()
@@ -297,6 +298,8 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public PageResult<VideoVO> getLikedVideos(Long userId, int page, int size) {
+        // 限制最大翻页深度
+        page = Math.min(page, 100);
         // 分页查询点赞记录
         Page<LikeRecord> likePage = likeRecordMapper.selectPage(
                 new Page<>(page, size),
@@ -329,6 +332,8 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public PageResult<VideoVO> getFavoritedVideos(Long userId, int page, int size) {
+        // 限制最大翻页深度
+        page = Math.min(page, 100);
         Page<Favorite> favPage = favoriteMapper.selectPage(
                 new Page<>(page, size),
                 new LambdaQueryWrapper<Favorite>()
@@ -357,6 +362,8 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public PageResult<UserVO> getFollowing(Long userId, int page, int size) {
+        // 限制最大翻页深度
+        page = Math.min(page, 100);
         Page<Follow> followPage = followMapper.selectPage(
                 new Page<>(page, size),
                 new LambdaQueryWrapper<Follow>()
@@ -389,6 +396,8 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public PageResult<UserVO> getFollowers(Long userId, int page, int size) {
+        // 限制最大翻页深度
+        page = Math.min(page, 100);
         Page<Follow> followPage = followMapper.selectPage(
                 new Page<>(page, size),
                 new LambdaQueryWrapper<Follow>()
@@ -482,7 +491,6 @@ public class UserServiceImpl implements UserService {
         vo.setFollowerCount(user.getFollowerCount());
         vo.setFollowingCount(user.getFollowingCount());
         vo.setVideoCount(user.getVideoCount());
-        vo.setLikeCount(user.getLikeCount());
         vo.setCreatedAt(user.getCreatedAt() != null ? user.getCreatedAt().format(DTF) : null);
         return vo;
     }

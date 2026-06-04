@@ -45,4 +45,7 @@ public class Video {
 
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+
+    @TableField("hot_score")
+    private Integer hotScore;
 }

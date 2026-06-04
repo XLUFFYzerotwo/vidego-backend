@@ -34,7 +34,8 @@ public interface VideoMapper extends BaseMapper<Video> {
      * 热门视频排行：按综合热度（播放量×0.7 + 点赞×0.2 + 评论×0.1）降序
      */
     @Select("SELECT * FROM video WHERE status = 1 " +
-            "ORDER BY (view_count * 0.7 + like_count * 0.2 + comment_count * 0.1) DESC " +
+//            "ORDER BY (view_count * 0.7 + like_count * 0.2 + comment_count * 0.1) DESC " +
+            "ORDER BY hot_score DESC " +
             "LIMIT #{limit}")
     List<Video> selectHotVideos(@Param("limit") int limit);
 }
