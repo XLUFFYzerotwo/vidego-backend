@@ -21,7 +21,7 @@
 
 <p align="center">    该项目由 Claude Code 辅助开发完成，开发过程中重点实践了 AI 协同编程、系统设计与工程化开发能力。</p>
 
-
+<p align="center">    [前端页面](https://github.com/XLUFFYzerotwo/vidego-web)</p>
 
 ---
 
