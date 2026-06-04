@@ -30,9 +30,6 @@ public class User {
     @TableField("following_count")
     private Integer followingCount;
 
-    @TableField("like_count")
-    private Integer likeCount;
-
     @TableField("video_count")
     private Integer videoCount;
 

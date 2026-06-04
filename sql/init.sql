@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS `user` (
   `bio` VARCHAR(200) DEFAULT NULL,
   `follower_count` INT DEFAULT 0,
   `following_count` INT DEFAULT 0,
-  `like_count` INT DEFAULT 0,
   `video_count` INT DEFAULT 0,
   `status` TINYINT DEFAULT 1 COMMENT '1:normal 0:disabled',
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -38,6 +37,7 @@ CREATE TABLE IF NOT EXISTS `video` (
   `comment_count` INT DEFAULT 0,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `hot_score` INT DEFAULT 0,
   INDEX `idx_user_id` (`user_id`),
   INDEX `idx_status_created` (`status`, `created_at`) COMMENT 'homepage feed/search pagination',
   FULLTEXT INDEX `ft_title_desc` (`title`, `description`)
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS `comment` (
   `content` VARCHAR(500) NOT NULL,
   `like_count` INT DEFAULT 0,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  INDEX `idx_video_id` (`video_id`),
+  INDEX `idx_video_parent_created` (video_id, parent_id, created_at),
   INDEX `idx_user_id` (`user_id`),
   INDEX `idx_parent_id` (`parent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment table';
