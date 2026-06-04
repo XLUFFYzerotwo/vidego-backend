@@ -69,6 +69,8 @@ public class VideoServiceImpl implements VideoService {
     private static final String CACHE_VIDEO_PREFIX = "vidego:cache:video:";
     private static final String VIEW_SET_PREFIX = "vidego:views:set:";
     private static final String CACHE_HOT_PREFIX = "vidego:cache:hot:videos";
+    //分布式锁
+    private static final String LOCK_VIDEO_PREFIX = "vidego:lock:video:";
 
     /** 视频详情缓存 TTL（秒） */
     private static final long CACHE_VIDEO_TTL = 600; // 10 分钟
@@ -155,6 +157,8 @@ public class VideoServiceImpl implements VideoService {
 
         log.info("Video created: id={}, title={}, userId={}",
                 video.getId(), video.getTitle(), userId);
+
+
         return toVideoVO(video);
     }
 
@@ -175,23 +179,38 @@ public class VideoServiceImpl implements VideoService {
                 redisTemplate.delete(cacheKey);
             }
         }
+        String lockKey = LOCK_VIDEO_PREFIX + videoId;
 
-        // 2. 缓存未命中，查询数据库
-        Video video = videoMapper.selectById(videoId);
-        if (video == null) {
-            throw new BusinessException(ErrorCode.VIDEO_NOT_FOUND);
+        Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 30, TimeUnit.SECONDS);
+        if (Boolean.TRUE.equals(locked)) {
+            try {
+                // 2. 缓存未命中，查询数据库
+                Video video = videoMapper.selectById(videoId);
+                if (video == null) {
+                    redisTemplate.opsForValue().set(cacheKey, "null", 30, TimeUnit.SECONDS);
+                    throw new BusinessException(ErrorCode.VIDEO_NOT_FOUND);
+                }
+                VideoVO vo = toVideoVO(video);
+
+                // 3. 写入缓存（异步非关键，失败不影响返回）
+                try {
+                    String json = objectMapper.writeValueAsString(vo);
+                    redisTemplate.opsForValue().set(cacheKey, json, CACHE_VIDEO_TTL, TimeUnit.SECONDS);
+                } catch (JsonProcessingException e) {
+                    log.warn("Failed to serialize video cache, id={}", videoId, e);
+                }
+
+                return vo;
+            } finally {
+                redisTemplate.delete(lockKey);
+            }
+        }else {
+            try {
+                Thread.sleep(100);
+            } finally {
+                return getVideoById(videoId);
+            }
         }
-        VideoVO vo = toVideoVO(video);
-
-        // 3. 写入缓存（异步非关键，失败不影响返回）
-        try {
-            String json = objectMapper.writeValueAsString(vo);
-            redisTemplate.opsForValue().set(cacheKey, json, CACHE_VIDEO_TTL, TimeUnit.SECONDS);
-        } catch (JsonProcessingException e) {
-            log.warn("Failed to serialize video cache, id={}", videoId, e);
-        }
-
-        return vo;
     }
 
     // ══════════════════════════════════════════════
@@ -234,7 +253,6 @@ public class VideoServiceImpl implements VideoService {
             try {
                 List<VideoVO> list = objectMapper.readValue(cached,
                         objectMapper.getTypeFactory().constructCollectionType(List.class, VideoVO.class));
-                // 缓存可能包含比请求更多的数据，截取
                 return list.size() > limit ? list.subList(0, limit) : list;
             } catch (JsonProcessingException e) {
                 log.warn("Failed to deserialize hot video cache", e);
@@ -242,19 +260,40 @@ public class VideoServiceImpl implements VideoService {
             }
         }
 
-        // 2. 查询数据库
-        List<Video> videos = videoMapper.selectHotVideos(limit);
-        List<VideoVO> vos = videos.stream().map(this::toVideoVO).collect(Collectors.toList());
+        // 2. 分布式锁：防止缓存击穿
+        String lockKey = "vidego:lock:hot";
+        Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 5, TimeUnit.SECONDS);
+        if (Boolean.TRUE.equals(locked)) {
+            try {
+                // 双重检查：防止拿到锁后缓存已被其他线程写入
+                cached = redisTemplate.opsForValue().get(CACHE_HOT_PREFIX);
+                if (cached != null) {
+                    try {
+                        return objectMapper.readValue(cached,
+                                objectMapper.getTypeFactory().constructCollectionType(List.class, VideoVO.class));
+                    } catch (JsonProcessingException e) {
+                        redisTemplate.delete(CACHE_HOT_PREFIX);
+                    }
+                }
 
-        // 3. 写入缓存
-        try {
-            String json = objectMapper.writeValueAsString(vos);
-            redisTemplate.opsForValue().set(CACHE_HOT_PREFIX, json, CACHE_HOT_TTL, TimeUnit.SECONDS);
-        } catch (JsonProcessingException e) {
-            log.warn("Failed to serialize hot video cache", e);
+                List<Video> videos = videoMapper.selectHotVideos(limit);
+                List<VideoVO> vos = videos.stream().map(this::toVideoVO).collect(Collectors.toList());
+
+                try {
+                    String json = objectMapper.writeValueAsString(vos);
+                    redisTemplate.opsForValue().set(CACHE_HOT_PREFIX, json, CACHE_HOT_TTL, TimeUnit.SECONDS);
+                } catch (JsonProcessingException e) {
+                    log.warn("Failed to serialize hot video cache", e);
+                }
+                return vos;
+            } finally {
+                redisTemplate.delete(lockKey);
+            }
+        } else {
+            // 未获取到锁，等待后递归重试
+            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+            return getHotVideos(limit);
         }
-
-        return vos;
     }
 
     // ══════════════════════════════════════════════
@@ -405,8 +444,12 @@ public class VideoServiceImpl implements VideoService {
 
     private void verifyVideoExists(String objectKey) {
         try {
-            minioClient.statObject(StatObjectArgs.builder()
+            StatObjectResponse stat = minioClient.statObject(StatObjectArgs.builder()
                     .bucket(minioConfig.getBucketVideo()).object(objectKey).build());
+            String contentType = stat.contentType();
+            if (contentType == null || !contentType.startsWith("video/")) {
+                throw new BusinessException(ErrorCode.FILE_TYPE_NOT_ALLOWED);
+            }
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.VIDEO_UPLOAD_FAILED,
                     "video file not found in storage, please upload first");
