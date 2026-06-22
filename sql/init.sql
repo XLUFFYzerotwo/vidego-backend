@@ -102,3 +102,19 @@ CREATE TABLE IF NOT EXISTS `favorite` (
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE INDEX `idx_user_video` (`user_id`, `video_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='favorite relation';
+
+-- 弹幕表
+CREATE TABLE danmaku (
+                         id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                         video_id BIGINT NOT NULL,
+                         user_id BIGINT NOT NULL,
+                         content VARCHAR(100) NOT NULL COMMENT '弹幕内容，最长100字',
+                         time FLOAT NOT NULL COMMENT '视频时间点（秒），支持小数',
+                         color VARCHAR(20) DEFAULT '#FFFFFF' COMMENT '弹幕颜色',
+                         type TINYINT DEFAULT 0 COMMENT '0:滚动 1:顶部 2:底部',
+                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                         status TINYINT DEFAULT 1 COMMENT '1:显示 0:待审核 -1:屏蔽',
+                         INDEX idx_video_time (video_id, time),
+                         INDEX idx_user_id (user_id),
+                         INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='弹幕表';
