@@ -6,6 +6,7 @@ import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.SetBucketPolicyArgs;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -13,6 +14,7 @@ import org.springframework.context.annotation.Configuration;
 
 @Slf4j
 @Configuration
+@Data
 public class MinioConfig {
 
     @Value("${vidego.minio.endpoint}")
@@ -32,6 +34,13 @@ public class MinioConfig {
 
     @Value("${vidego.minio.bucket-cover}")
     public String bucketCover;
+
+    // 开发/生产区分
+    @Value("${vidego.minio.use-nginx-proxy}")
+    private boolean useNginxProxy;
+
+    @Value("${vidego.minio.proxy-prefix}")
+    private String proxyPrefix;
 
     @Bean
     public MinioClient minioClient() {

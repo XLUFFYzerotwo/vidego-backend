@@ -32,6 +32,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.io.*;
+import java.net.URL;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -109,6 +110,16 @@ public class VideoServiceImpl implements VideoService {
                             .object(objectKey)
                             .expiry(PRESIGNED_EXPIRY_MINUTES, TimeUnit.MINUTES)
                             .build());
+
+            log.info("Get presigned object url: {}", uploadUrl);
+            if (minioConfig.isUseNginxProxy()) {
+                // 生产环境：替换域名，拼接 /upload-minio 前缀
+                // rawUrl=http://minio:9000/vidego-videos/xxx
+                // 替换为 /upload-minio/vidego-videos/xxx
+                String path = new URL(uploadUrl).getPath();
+                uploadUrl = minioConfig.getProxyPrefix() + path;
+            }
+
             log.info("Upload token generated: userId={}, objectKey={}, size={}", userId, objectKey, fileSize);
             return new UploadTokenVO(uploadUrl, objectKey);
         } catch (Exception e) {
