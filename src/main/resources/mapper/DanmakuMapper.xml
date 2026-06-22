@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.vidego.module.danmaku.mapper.DanmakuMapper">
+    <select id="selectByVideoIdAndTimeRange" resultType="com.vidego.module.danmaku.entity.Danmaku">
+        SELECT * FROM danmaku
+        WHERE video_id = #{videoId}
+          AND time BETWEEN #{startTime} AND #{endTime}
+          AND status = 1
+        ORDER BY time ASC
+    </select>
+</mapper>

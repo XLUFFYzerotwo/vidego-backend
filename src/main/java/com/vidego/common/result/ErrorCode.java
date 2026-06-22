@@ -19,6 +19,7 @@ public enum ErrorCode {
     INVALID_TOKEN(1006, "invalid or expired token"),
     TOKEN_EXPIRED(1007, "token expired"),
     USER_DISABLED(1008, "account has been disabled"),
+    USER_SEND_FREQUENTLY(1009, "user send frequently"),
 
     // ── 业务：视频模块 2001-2999 ──
     VIDEO_NOT_FOUND(2001, "video not found"),
