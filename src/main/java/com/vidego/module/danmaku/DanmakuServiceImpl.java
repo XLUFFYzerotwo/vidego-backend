@@ -1,5 +1,8 @@
 package com.vidego.module.danmaku;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vidego.common.exception.BusinessException;
 import com.vidego.common.result.ErrorCode;
 import com.vidego.module.danmaku.dto.DanmakuCreateRequest;
@@ -16,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,10 +29,12 @@ public class DanmakuServiceImpl implements DanmakuService {
     private final DanmakuMapper danmakuMapper;
     private final UserMapper userMapper;
     private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper;
 
     private static final String RATE_LIMIT_KEY = "danmaku:rate_limit:%d";
+    private static final String CACHE_DANMAKU_PREFIX = "cache:danmaku:videoId:";
     private static final int RATE_LIMIT_SECONDS = 2;
-    private static final int RATE_LIMIT_COUNT = 1;
+    private static final long CACHE_DANMAKU_TTL = 60;
 
     @Override
     public DanmakuVO createDanmaku(Long userId, DanmakuCreateRequest request) {
@@ -47,20 +53,34 @@ public class DanmakuServiceImpl implements DanmakuService {
 
         danmakuMapper.insert(danmaku);
 
-
-
         // 更新速率限制
-        String key = String.format(RATE_LIMIT_KEY, userId);
-        redisTemplate.opsForValue().set(key, "1", Duration.ofSeconds(RATE_LIMIT_SECONDS));
+        String rateKey = String.format(RATE_LIMIT_KEY, userId);
+        redisTemplate.opsForValue().set(rateKey, "1", Duration.ofSeconds(RATE_LIMIT_SECONDS));
+
+        // 失效该视频的缓存，下次查询重新加载（实时弹幕立即可见）
+        String cacheKey = CACHE_DANMAKU_PREFIX + request.getVideoId();
+        redisTemplate.delete(cacheKey);
 
         return convertToVO(danmaku);
     }
 
     @Override
     public List<DanmakuVO> getDanmakuByVideoId(Long videoId, Float startTime, Float endTime) {
-
-        List<Danmaku> list = danmakuMapper.selectByVideoIdAndTimeRange(videoId, startTime, endTime);
-        return list.stream().map(this::convertToVO).collect(Collectors.toList());
+        String key = CACHE_DANMAKU_PREFIX + videoId;
+        List<DanmakuVO> cached = tryGetFromCache(key);
+        if (cached != null) {
+            // 缓存命中：在内存中按时间范围过滤，避免重复查库
+            return cached.stream()
+                    .filter(d -> d.getTime() >= startTime && d.getTime() <= endTime)
+                    .collect(Collectors.toList());
+        }
+        // 缓存未命中：查全量弹幕并写入缓存
+        List<Danmaku> list = danmakuMapper.selectByVideoIdAndTimeRange(videoId, 0f, 999999f);
+        List<DanmakuVO> allDanmaku = list.stream().map(this::convertToVO).collect(Collectors.toList());
+        putToCache(key, allDanmaku, CACHE_DANMAKU_TTL);
+        return allDanmaku.stream()
+                .filter(d -> d.getTime() >= startTime && d.getTime() <= endTime)
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -100,5 +120,26 @@ public class DanmakuServiceImpl implements DanmakuService {
         }
 
         return vo;
+    }
+
+    private List<DanmakuVO> tryGetFromCache(String key) {
+        String json = redisTemplate.opsForValue().get(key);
+        if (json == null) return null;
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<DanmakuVO>>() {});
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to deserialize danmaku cache: key={}", key, e);
+            redisTemplate.delete(key);
+            return null;
+        }
+    }
+
+    private void putToCache(String key, List<DanmakuVO> result, long ttlMinutes) {
+        try {
+            String json = objectMapper.writeValueAsString(result);
+            redisTemplate.opsForValue().set(key, json, ttlMinutes, TimeUnit.MINUTES);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to serialize feed cache: key={}", key, e);
+        }
     }
 }
