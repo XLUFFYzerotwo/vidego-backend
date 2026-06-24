@@ -112,13 +112,6 @@ public class VideoServiceImpl implements VideoService {
                             .build());
 
             log.info("Get presigned object url: {}", uploadUrl);
-            if (minioConfig.isUseNginxProxy()) {
-                // 生产环境：替换域名，拼接 /upload-minio 前缀
-                // rawUrl=http://minio:9000/vidego-videos/xxx
-                // 替换为 /upload-minio/vidego-videos/xxx
-                String path = new URL(uploadUrl).getPath();
-                uploadUrl = minioConfig.getProxyPrefix() + path;
-            }
 
             log.info("Upload token generated: userId={}, objectKey={}, size={}", userId, objectKey, fileSize);
             return new UploadTokenVO(uploadUrl, objectKey);

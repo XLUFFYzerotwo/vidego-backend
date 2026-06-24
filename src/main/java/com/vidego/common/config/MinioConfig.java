@@ -35,12 +35,6 @@ public class MinioConfig {
     @Value("${vidego.minio.bucket-cover}")
     public String bucketCover;
 
-    // 开发/生产区分
-    @Value("${vidego.minio.use-nginx-proxy}")
-    private boolean useNginxProxy;
-
-    @Value("${vidego.minio.proxy-prefix}")
-    private String proxyPrefix;
 
     @Bean
     public MinioClient minioClient() {
