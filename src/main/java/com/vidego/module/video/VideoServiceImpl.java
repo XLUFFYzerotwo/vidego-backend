@@ -24,6 +24,7 @@ import com.vidego.module.video.mapper.LikeRecordMapper;
 import com.vidego.module.video.mapper.FavoriteMapper;
 import com.vidego.module.video.entity.Favorite;
 import com.vidego.module.video.entity.LikeRecord;
+import com.vidego.module.video.mq.VideoEventPublisher;
 import io.minio.*;
 import io.minio.http.Method;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +33,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.io.*;
-import java.net.URL;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -54,6 +54,8 @@ public class VideoServiceImpl implements VideoService {
     private final ObjectMapper objectMapper;
     private final LikeRecordMapper likeRecordMapper;
     private final FavoriteMapper favoriteMapper;
+    private final VideoEventPublisher videoEventPublisher;
+    private final CoverGenerationService coverGenerationService;
 
     private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -133,16 +135,12 @@ public class VideoServiceImpl implements VideoService {
         // 2. 防并发重复
         checkDuplicateVideoKey(request.getVideoKey());
 
-        // 3. 生成封面
-        String coverKey = generateCoverWithUrl(request.getVideoKey(), userId);
-
-        // 4. 写入数据库
+        // 3. 写入数据库
         Video video = new Video();
         video.setUserId(userId);
         video.setTitle(request.getTitle());
         video.setDescription(request.getDescription());
         video.setVideoKey(request.getVideoKey());
-        video.setCoverKey(coverKey);
         video.setDuration(request.getDuration());
         video.setSize(request.getSize());
         video.setStatus(1);
@@ -161,7 +159,15 @@ public class VideoServiceImpl implements VideoService {
 
         log.info("Video created: id={}, title={}, userId={}",
                 video.getId(), video.getTitle(), userId);
-
+        // 4. 生成封面
+        if (request.getDuration() <= 30L){
+            String coverKey = coverGenerationService.generateCoverWithUrl(request.getVideoKey(), userId);
+            videoMapper.update(null,new LambdaUpdateWrapper<Video>()
+                    .set(Video::getCoverKey,coverKey)
+                    .eq(Video::getId,video.getId()));
+        }else {
+            videoEventPublisher.publishVideoCreated(video,request.getTags());
+        }
 
         return toVideoVO(video);
     }
@@ -470,118 +476,6 @@ public class VideoServiceImpl implements VideoService {
             throw new BusinessException(ErrorCode.VIDEO_UPLOAD_FAILED,
                     "video with this key already exists");
         }
-    }
-
-    /**
-     * 用 FFmpeg 通过 MinIO 预签名 URL 生成封面。
-     * -ss 在 -i 之前（fast seek），MinIO 支持 HTTP Range 请求，无需下载整个文件。
-     * 输出直接通过 image2pipe 读入内存，不落地磁盘。
-     */
-    private String generateCoverWithUrl(String videoKey, Long userId) {
-        Process process = null;
-        try {
-            // 生成 10 分钟有效的预签名 GET URL（FFmpeg 处理通常只需几秒）
-            String presignedUrl = minioClient.getPresignedObjectUrl(
-                    GetPresignedObjectUrlArgs.builder()
-                            .method(Method.GET)
-                            .bucket(minioConfig.getBucketVideo())
-                            .object(videoKey)
-                            .expiry(10, TimeUnit.MINUTES)
-                            .build());
-
-            String coverKey = userId + "/" + UUID.randomUUID() + ".jpg";
-
-            // -ss 在 -i 之前 → fast seek（MinIO 支持 HTTP Range 请求）
-            ProcessBuilder pb = new ProcessBuilder(
-                    "ffmpeg",
-                    "-ss", "00:00:01",
-                    "-i", presignedUrl,
-                    "-vframes", "1",
-                    "-vf", "scale=320:-1",
-                    "-f", "image2pipe",
-                    "-"
-            );
-            pb.redirectErrorStream(true); // stderr → stdout，统一处理
-            process = pb.start();
-
-            // 读 FFmpeg stdout（JPEG 数据 + 可能的日志）
-            ByteArrayOutputStream jpegBuf = new ByteArrayOutputStream();
-            try (InputStream ffmpegOut = process.getInputStream()) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = ffmpegOut.read(buf)) != -1) {
-                    jpegBuf.write(buf, 0, n);
-                }
-            }
-
-            int exitCode = process.waitFor(30, TimeUnit.SECONDS) ? process.exitValue() : -1;
-            if (exitCode != 0) {
-                process.destroyForcibly();
-                // FFmpeg 正常退出但 exit code 非零，或超时
-                String logMsg = exitCode == -1 ? "timed out" : ("exited with code " + exitCode);
-                log.warn("FFmpeg {} for videoKey={}", logMsg, videoKey);
-                return null;
-            }
-
-            // 从 stdout 提取 JPEG（跳过 FFmpeg 日志混杂问题，取末尾有效 JPEG 数据）
-            if (jpegBuf.size() > 0) {
-                byte[] jpegData = extractJpegFromBuffer(jpegBuf.toByteArray());
-                if (jpegData == null) {
-                    log.warn("No valid JPEG found in FFmpeg output for videoKey={}", videoKey);
-                    return null;
-                }
-
-                minioClient.putObject(
-                        PutObjectArgs.builder()
-                                .bucket(minioConfig.getBucketCover())
-                                .object(coverKey)
-                                .stream(new ByteArrayInputStream(jpegData), jpegData.length, -1)
-                                .contentType("image/jpeg")
-                                .build());
-
-                log.info("Cover generated via presigned URL: videoKey={}, coverKey={}",
-                        videoKey, coverKey);
-                return coverKey;
-            }
-
-        } catch (Exception e) {
-            log.error("Cover generation failed for videoKey={}", videoKey, e);
-        } finally {
-            if (process != null && process.isAlive()) {
-                process.destroyForcibly();
-            }
-        }
-        return null;
-    }
-
-    /**
-     * 从 FFmpeg stdout 的混合输出中提取 JPEG 数据。
-     * redirectErrorStream(true) 会把日志混入 stdout，JPEG 以 FFD8 开头、FFD9 结尾。
-     * 取最后一个 FFD8...FFD9 段（FFmpeg 先打印日志再输出图片）。
-     */
-    private byte[] extractJpegFromBuffer(byte[] data) {
-        // 查找最后一个 JPEG SOI (0xFF 0xD8)
-        int start = -1;
-        for (int i = data.length - 2; i >= 0; i--) {
-            if ((data[i] & 0xFF) == 0xFF && (data[i + 1] & 0xFF) == 0xD8) {
-                start = i;
-                break;
-            }
-        }
-        if (start < 0) return null;
-
-        // 查找 JPEG EOI (0xFF 0xD9)
-        int end = -1;
-        for (int i = start + 2; i < data.length - 1; i++) {
-            if ((data[i] & 0xFF) == 0xFF && (data[i + 1] & 0xFF) == 0xD9) {
-                end = i + 1;
-            }
-        }
-        if (end < 0) return null;
-
-        byte[] jpeg = new byte[end - start + 1];
-        System.arraycopy(data, start, jpeg, 0, jpeg.length);
-        return jpeg;
     }
 
     private void handleVideoTags(Long videoId, List<String> tagNames) {
