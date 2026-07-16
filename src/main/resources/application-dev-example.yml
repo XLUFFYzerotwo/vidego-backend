@@ -1,9 +1,26 @@
 # =====================================================
-# Vidego Backend — 开发环境配置示例
+# Vidego Backend - 开发环境配置示例
 # 使用前复制为 application-dev.yml 并填入实际参数
 # =====================================================
 
 spring:
+  rabbitmq:
+    host: localhost
+    port: 5672
+    virtual-host: /
+    username: rabbitadmin
+    password: rabbitadmin
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 5
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 2s
+          multiplier: 2.0
   datasource:
     url: jdbc:mysql://localhost:3306/vidego?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
     username: root
