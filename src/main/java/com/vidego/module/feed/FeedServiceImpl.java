@@ -46,7 +46,7 @@ public class FeedServiceImpl implements FeedService {
     // ── Redis 缓存配置 ──
     private static final String CACHE_RECOMMENDED_PREFIX = "vidego:cache:feed:recommended:page1";
     private static final String CACHE_LATEST_PREFIX = "vidego:cache:feed:latest:page1";
-    private static final long CACHE_RECOMMENDED_TTL = 60;   // 1 分钟
+    private static final long CACHE_RECOMMENDED_TTL = 30;   // 30 秒
     private static final long CACHE_LATEST_TTL = 30;        // 30 秒
 
     @Override
