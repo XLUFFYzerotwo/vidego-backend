@@ -1,4 +1,4 @@
-<div align="center">
+<img width="1912" height="922" alt="image" src="https://github.com/user-attachments/assets/42893c81-48fa-4dbb-8f7d-60df0c96d620" /><div align="center">
   <img src="https://img.shields.io/badge/Spring%20Boot-3.2-6DB33F?style=flat&logo=springboot&logoColor=white" alt="Spring Boot" />
   <img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat&logo=mysql&logoColor=white" alt="MySQL" />
   <img src="https://img.shields.io/badge/Redis-7-DC382D?style=flat&logo=redis&logoColor=white" alt="Redis" />
@@ -45,6 +45,7 @@
 ### 核心业务
 - **用户系统** — 注册/登录、JWT 双 Token 认证、Redis 黑名单登出、修改密码
 - **视频模块** — 预签名 URL 直传 MinIO、FFmpeg 管道流封面生成、播放量防刷
+- **弹幕模块** — 实时发送弹幕、接收弹幕
 - **评论系统** — 楼中楼回复、分页查询、评论点赞/取消
 - **社交互动** — 视频点赞/收藏、用户关注/取关
 - **内容发现** — 全站搜索(FULLTEXT)、热门排行、分类推荐、最新视频
@@ -76,17 +77,18 @@ vidego-backend/
 │   │   ├── TokenService.java       # Redis 黑名单管理
 │   │   └── UserContext.java        # ThreadLocal 用户上下文
 │   ├── common/                     # 公共基础设施
-│   │   ├── config/                 # MinIO/Redis/CORS/MyBatis-Plus 配置
+│   │   ├── config/                 # MinIO/Redis/CORS/MyBatis-Plus/WebSocket 配置
 │   │   ├── exception/              # 全局异常处理器
 │   │   ├── result/                 # 统一响应 Result + PageResult
 │   │   ├── constant/               # 常量定义
 │   │   └── task/                   # 定时任务 (HotVideoTask)
 │   └── module/                     # 业务模块
+|       ├── danmuku/                # 弹幕发送/获取（STOMP+WebSocket）
 │       ├── user/                   # 用户注册/登录/个人中心/关注
 │       ├── video/                  # 视频上传/播放/点赞/收藏
 │       ├── comment/                # 评论/回复/点赞
 │       ├── feed/                   # 首页推荐/最新/分类
-│       └── search/                 # 全文搜索
+│       └── search/                 # 全文搜索  
 └── pom.xml
 ```
 
@@ -148,25 +150,8 @@ services:
   redis:    # 7-alpine, port 6379
   minio:    # latest (不暴露 9000 公网)
   backend:  # JDK 17 + FFmpeg
+  frontend: # nginx代理，port 8081
 ```
-
-### 部署步骤
-
-```bash
-# 1. 构建
-mvn clean package -DskipTests
-cp target/vidego-backend-1.0.0.jar deploy/backend/
-
-# 2. 上传服务器
-scp -r deploy/ root@<IP>:/opt/vidego/
-
-# 3. 启动
-ssh root@<IP>
-cd /opt/vidego/deploy
-docker-compose up -d
-```
-
----
 
 ## 📖 API 文档
 
@@ -193,6 +178,9 @@ docker-compose up -d
 | Comment | `GET /api/videos/{id}/comments` | 评论列表 |
 | Comment | `POST /api/videos/{id}/comments` | 发表评论 |
 | Comment | `POST/DELETE /api/comments/{id}/like` | 评论点赞 |
+| Danmuku | `GET /api/videos/{videoId}/danmaku` | 弹幕列表 |
+| Danmuku | `POST /api/videos/{id}/comments` | 发表评论 |
+| Danmuku | `POST/DELETE /api/comments/{id}/like` | 评论点赞 |
 | Feed | `GET /api/feed/recommended` | 首页推荐 |
 | Feed | `GET /api/feed/latest` | 最新视频 |
 | Feed | `GET /api/feed/by-tag` | 按标签分类 |
@@ -213,3 +201,14 @@ docker-compose up -d
 
 ### 4. 管道流封面生成
 FFmpeg 通过 pipe:0/stdin 直读 MinIO 视频流，输出 JPEG 到 stdout 后直接 PutObject，全程内存操作、零磁盘读写。
+
+## 项目截图
+### 1. 登录页面
+<img width="1912" height="922" alt="image" src="https://github.com/user-attachments/assets/d13dc586-6e66-4cb4-a604-d6f6e5fa8539" />
+### 2. 视频上传页面
+<img width="1912" height="922" alt="image" src="https://github.com/user-attachments/assets/9c3eaf0e-880c-472f-8617-1673129e3a74" />
+<img width="1912" height="922" alt="image" src="https://github.com/user-attachments/assets/cae2c213-dc35-4555-ac58-01a845285fab" />
+### 3. 视频播放页面
+<img width="1912" height="922" alt="image" src="https://github.com/user-attachments/assets/4e1b7f28-0f0a-493e-8885-ed8929d08f1b" />
+### 4. 视频网站首页
+<img width="1912" height="922" alt="image" src="https://github.com/user-attachments/assets/d67f0879-81f3-47dc-9998-8759a510a730" />
