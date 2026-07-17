@@ -118,3 +118,10 @@ CREATE TABLE danmaku (
                          INDEX idx_user_id (user_id),
                          INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='弹幕表';
+
+ALTER TABLE `video`
+    ADD COLUMN `audit_status`  TINYINT DEFAULT 0 COMMENT '0:待审核 1:通过 -1:不通过',
+    ADD COLUMN `audit_reason`  VARCHAR(200) DEFAULT NULL COMMENT '审核不通过原因',
+    ADD COLUMN `audited_at`    DATETIME DEFAULT NULL COMMENT '审核时间',
+    ADD COLUMN `auditor_id`    BIGINT DEFAULT NULL COMMENT '审核人ID（管理员/系统）',
+    ADD INDEX `idx_audit_status_created` (`audit_status`, `created_at`);
