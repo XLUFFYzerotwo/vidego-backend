@@ -105,10 +105,13 @@ public class FeedServiceImpl implements FeedService {
             return new PageResult<>(Collections.emptyList(), 0, page, size);
         }
 
-        // 批量查询视频详情
+        // 批量查询视频详情（仅返回已发布且审核通过的视频）
         Set<Long> videoIds = relationPage.getRecords().stream()
                 .map(VideoTag::getVideoId).collect(Collectors.toSet());
-        List<Video> videos = videoMapper.selectBatchIds(videoIds);
+        List<Video> videos = videoMapper.selectList(new LambdaQueryWrapper<Video>()
+                .in(Video::getId, videoIds)
+                .eq(Video::getStatus, 1)
+                .eq(Video::getAuditStatus, 1));
 
         // 转换为 VideoVO（保持分页顺序）
         List<VideoVO> vos = videos.stream()
@@ -124,12 +127,14 @@ public class FeedServiceImpl implements FeedService {
 
     /**
      * 按最新发布分页查询已发布的视频
+     * 仅返回已发布（status=1）且审核通过（audit_status=1）的视频
      */
     private PageResult<VideoVO> queryLatestVideos(int page, int size) {
         Page<Video> videoPage = videoMapper.selectPage(
                 new Page<>(page, size),
                 new LambdaQueryWrapper<Video>()
                         .eq(Video::getStatus, 1)
+                        .eq(Video::getAuditStatus, 1)
                         .orderByDesc(Video::getCreatedAt));
 
         List<VideoVO> vos = videoPage.getRecords().stream()

@@ -59,6 +59,7 @@ public class SearchServiceImpl implements SearchService {
                     new Page<>(page, size),
                     new LambdaQueryWrapper<Video>()
                             .eq(Video::getStatus, 1)
+                            .eq(Video::getAuditStatus, 1)
                             .apply("MATCH(title, description) AGAINST({0} IN BOOLEAN MODE)", trimmed));
 
             if (!videoPage.getRecords().isEmpty()) {
@@ -82,12 +83,14 @@ public class SearchServiceImpl implements SearchService {
 
     /**
      * LIKE 模糊搜索（兜底方案）
+     * 仅返回已发布（status=1）且审核通过（audit_status=1）的视频
      */
     private PageResult<VideoVO> searchByLike(String keyword, int page, int size) {
         Page<Video> videoPage = videoMapper.selectPage(
                 new Page<>(page, size),
                 new LambdaQueryWrapper<Video>()
                         .eq(Video::getStatus, 1)
+                        .eq(Video::getAuditStatus, 1)
                         .and(w -> w.like(Video::getTitle, keyword)
                                 .or()
                                 .like(Video::getDescription, keyword))
