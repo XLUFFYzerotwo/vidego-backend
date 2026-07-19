@@ -31,6 +31,30 @@ public class Video {
 
     private Integer status;
 
+    /**
+     * 审核状态：0=待审核 1=审核通过 -1=审核不通过
+     */
+    @TableField("audit_status")
+    private Integer auditStatus;
+
+    /**
+     * 审核不通过原因（audit_status = -1 时填充）
+     */
+    @TableField("audit_reason")
+    private String auditReason;
+
+    /**
+     * 审核时间
+     */
+    @TableField("audited_at")
+    private LocalDateTime auditedAt;
+
+    /**
+     * 审核人 ID（管理员 / 系统=0）
+     */
+    @TableField("auditor_id")
+    private Long auditorId;
+
     @TableField("view_count")
     private Integer viewCount;
 
