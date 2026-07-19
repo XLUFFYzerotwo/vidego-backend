@@ -26,6 +26,9 @@ public class VideoProcessMessage {
     /** 视频标题 */
     private String title;
 
+    /** 视频描述 */
+    private String description;
+
     /** MinIO 中的视频对象 key */
     private String videoKey;
 

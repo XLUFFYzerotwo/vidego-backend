@@ -40,6 +40,7 @@ public class VideoEventPublisher {
                 video.getId(),
                 video.getUserId(),
                 video.getTitle(),
+                video.getDescription(),
                 video.getVideoKey(),
                 video.getDuration(),
                 video.getSize(),
