@@ -1,5 +1,6 @@
 package com.vidego.module.video;
 
+import com.vidego.common.result.PageResult;
 import com.vidego.module.video.dto.UploadTokenVO;
 import com.vidego.module.video.dto.VideoCreateRequest;
 import com.vidego.module.video.dto.VideoVO;
@@ -76,4 +77,21 @@ public interface VideoService {
      * 查询当前用户是否已收藏
      */
     boolean getFavoriteStatus(Long videoId, Long userId);
+
+    // ── 审核 ──
+
+    /**
+     * 更新视频审核状态
+     *
+     * @param videoId    视频 ID
+     * @param auditStatus 审核状态：1=通过 -1=不通过
+     * @param reason     不通过原因（通过时传 null）
+     * @param auditorId  审核人 ID（系统自动审核传 0）
+     */
+    void updateAuditStatus(Long videoId, int auditStatus, String reason, Long auditorId);
+
+    /**
+     * 获取待审核视频列表（分页）
+     */
+    PageResult<VideoVO> getAuditPendingVideos(int page, int size);
 }

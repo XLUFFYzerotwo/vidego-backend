@@ -29,7 +29,8 @@ public enum ErrorCode {
     UPLOAD_TOKEN_FAILED(2005, "failed to generate upload token"),
     VIDEO_UPLOAD_FAILED(2006, "video upload verification failed"),
     NOT_VIDEO_OWNER(2007, "you are not the owner of this video"),
-    TAG_NOT_FOUND(2008, "tag not found");
+    TAG_NOT_FOUND(2008, "tag not found"),
+    VIDEO_NOT_APPROVED(2009, "video is not approved yet");
 
     private final int code;
     private final String message;

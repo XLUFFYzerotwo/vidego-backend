@@ -2,12 +2,14 @@ package com.vidego.module.video;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vidego.auth.UserContext;
 import com.vidego.common.config.MinioConfig;
 import com.vidego.common.exception.BusinessException;
 import com.vidego.common.result.ErrorCode;
+import com.vidego.common.result.PageResult;
 import com.vidego.module.user.entity.User;
 import com.vidego.module.user.mapper.UserMapper;
 import com.vidego.module.user.vo.UserVO;
@@ -34,6 +36,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.io.*;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -55,7 +58,6 @@ public class VideoServiceImpl implements VideoService {
     private final LikeRecordMapper likeRecordMapper;
     private final FavoriteMapper favoriteMapper;
     private final VideoEventPublisher videoEventPublisher;
-    private final CoverGenerationService coverGenerationService;
 
     private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -144,6 +146,8 @@ public class VideoServiceImpl implements VideoService {
         video.setDuration(request.getDuration());
         video.setSize(request.getSize());
         video.setStatus(1);
+        // 新建视频默认进入待审核状态（audit_status=0），由 MQ 异步审核 + 管理员人工复核
+        video.setAuditStatus(0);
         video.setViewCount(0);
         video.setLikeCount(0);
         video.setCommentCount(0);
@@ -159,15 +163,11 @@ public class VideoServiceImpl implements VideoService {
 
         log.info("Video created: id={}, title={}, userId={}",
                 video.getId(), video.getTitle(), userId);
-        // 4. 生成封面
-        if (request.getDuration() <= 30L){
-            String coverKey = coverGenerationService.generateCoverWithUrl(request.getVideoKey(), userId);
-            videoMapper.update(null,new LambdaUpdateWrapper<Video>()
-                    .set(Video::getCoverKey,coverKey)
-                    .eq(Video::getId,video.getId()));
-        }else {
-            videoEventPublisher.publishVideoCreated(video,request.getTags());
-        }
+
+        // 4. 统一发布 video.created 事件，异步处理：
+        //    - cover.queue → 封面生成（通过 VideoCoverConsumer）
+        //    - audit.queue  → 自动审核（通过 AdminVideoAuditConsumer）
+        videoEventPublisher.publishVideoCreated(video, request.getTags());
 
         return toVideoVO(video);
     }
@@ -178,10 +178,13 @@ public class VideoServiceImpl implements VideoService {
 
     @Override
     public VideoVO getVideoById(Long videoId) {
-        // 1. 尝试从缓存读取
+        // 1. 尝试从缓存读取（缓存仅包含审核通过的视频，详见下方写入逻辑）
         String cacheKey = CACHE_VIDEO_PREFIX + videoId;
         String cached = redisTemplate.opsForValue().get(cacheKey);
         if (cached != null) {
+            if ("null".equals(cached)) {
+                throw new BusinessException(ErrorCode.VIDEO_NOT_FOUND);
+            }
             try {
                 return objectMapper.readValue(cached, VideoVO.class);
             } catch (JsonProcessingException e) {
@@ -200,14 +203,25 @@ public class VideoServiceImpl implements VideoService {
                     redisTemplate.opsForValue().set(cacheKey, "null", 30, TimeUnit.SECONDS);
                     throw new BusinessException(ErrorCode.VIDEO_NOT_FOUND);
                 }
+
+                // 3. 权限检查：非上传者 && 未审核通过 → 拒绝访问
+                Long currentUserId = UserContext.getUserId();
+                boolean isOwner = currentUserId != null && currentUserId.equals(video.getUserId());
+                Integer auditStatus = video.getAuditStatus();
+                if (!isOwner && (auditStatus == null || auditStatus != 1)) {
+                    throw new BusinessException(ErrorCode.VIDEO_NOT_APPROVED);
+                }
+
                 VideoVO vo = toVideoVO(video);
 
-                // 3. 写入缓存（异步非关键，失败不影响返回）
-                try {
-                    String json = objectMapper.writeValueAsString(vo);
-                    redisTemplate.opsForValue().set(cacheKey, json, CACHE_VIDEO_TTL, TimeUnit.SECONDS);
-                } catch (JsonProcessingException e) {
-                    log.warn("Failed to serialize video cache, id={}", videoId, e);
+                // 4. 仅缓存审核通过的视频，避免待审核/不通过视频被他人通过缓存绕过权限
+                if (video.getAuditStatus() != null && video.getAuditStatus() == 1) {
+                    try {
+                        String json = objectMapper.writeValueAsString(vo);
+                        redisTemplate.opsForValue().set(cacheKey, json, CACHE_VIDEO_TTL, TimeUnit.SECONDS);
+                    } catch (JsonProcessingException e) {
+                        log.warn("Failed to serialize video cache, id={}", videoId, e);
+                    }
                 }
 
                 return vo;
@@ -439,6 +453,54 @@ public class VideoServiceImpl implements VideoService {
     }
 
     // ══════════════════════════════════════════════
+    //  审核
+    // ══════════════════════════════════════════════
+
+    @Override
+    @Transactional
+    public void updateAuditStatus(Long videoId, int auditStatus, String reason, Long auditorId) {
+        // 仅允许设置为 1（通过）或 -1（不通过）
+        if (auditStatus != 1 && auditStatus != -1) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "invalid audit status");
+        }
+        Video video = videoMapper.selectById(videoId);
+        if (video == null) {
+            throw new BusinessException(ErrorCode.VIDEO_NOT_FOUND);
+        }
+        // 不通过时必须填写原因；通过时清空原因
+        String finalReason = (auditStatus == -1) ? reason : null;
+
+        videoMapper.update(null, new LambdaUpdateWrapper<Video>()
+                .set(Video::getAuditStatus, auditStatus)
+                .set(Video::getAuditReason, finalReason)
+                .set(Video::getAuditedAt, LocalDateTime.now())
+                .set(Video::getAuditorId, auditorId)
+                .eq(Video::getId, videoId));
+
+        // 清除视频详情缓存和热门缓存（审核状态变化后需重新加载）
+        redisTemplate.delete(CACHE_VIDEO_PREFIX + videoId);
+        redisTemplate.delete(CACHE_HOT_PREFIX);
+
+        log.info("Video audit status updated: id={}, status={}, auditorId={}", videoId, auditStatus, auditorId);
+    }
+
+    @Override
+    public PageResult<VideoVO> getAuditPendingVideos(int page, int size) {
+        Page<Video> videoPage = videoMapper.selectPage(
+                new Page<>(page, size),
+                new LambdaQueryWrapper<Video>()
+                        .eq(Video::getAuditStatus, 0)
+                        .orderByDesc(Video::getCreatedAt));
+
+        List<VideoVO> vos = videoPage.getRecords().stream()
+                .map(this::toVideoVO)
+                .collect(Collectors.toList());
+
+        return new PageResult<>(vos, videoPage.getTotal(),
+                (int) videoPage.getCurrent(), (int) videoPage.getSize());
+    }
+
+    // ══════════════════════════════════════════════
     //  私有方法
     // ══════════════════════════════════════════════
 
@@ -520,6 +582,8 @@ public class VideoServiceImpl implements VideoService {
         vo.setDuration(video.getDuration());
         vo.setSize(video.getSize());
         vo.setStatus(video.getStatus());
+        vo.setAuditStatus(video.getAuditStatus());
+        vo.setAuditReason(video.getAuditReason());
         vo.setViewCount(video.getViewCount());
         vo.setLikeCount(video.getLikeCount());
         vo.setCommentCount(video.getCommentCount());
