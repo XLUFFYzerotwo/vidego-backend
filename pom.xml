@@ -119,6 +119,12 @@
             <artifactId>sensitive-word</artifactId>
             <version>0.29.2</version>
         </dependency>
+
+        <!-- AOP（用于 AdminAuthAspect 管理员权限校验切面） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
