@@ -125,3 +125,5 @@ ALTER TABLE `video`
     ADD COLUMN `audited_at`    DATETIME DEFAULT NULL COMMENT '审核时间',
     ADD COLUMN `auditor_id`    BIGINT DEFAULT NULL COMMENT '审核人ID（管理员/系统）',
     ADD INDEX `idx_audit_status_created` (`audit_status`, `created_at`);
+
+ALTER TABLE `user` ADD COLUMN `role` TINYINT DEFAULT 0 COMMENT '0:普通用户 1:管理员' AFTER `status`;

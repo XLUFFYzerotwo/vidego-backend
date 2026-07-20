@@ -491,6 +491,7 @@ public class UserServiceImpl implements UserService {
         vo.setFollowerCount(user.getFollowerCount());
         vo.setFollowingCount(user.getFollowingCount());
         vo.setVideoCount(user.getVideoCount());
+        vo.setRole(user.getRole());
         vo.setCreatedAt(user.getCreatedAt() != null ? user.getCreatedAt().format(DTF) : null);
         return vo;
     }
