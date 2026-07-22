@@ -127,3 +127,21 @@ ALTER TABLE `video`
     ADD INDEX `idx_audit_status_created` (`audit_status`, `created_at`);
 
 ALTER TABLE `user` ADD COLUMN `role` TINYINT DEFAULT 0 COMMENT '0:普通用户 1:管理员' AFTER `status`;
+
+-- 通知表
+CREATE TABLE IF NOT EXISTS `notification` (
+    `id`          BIGINT PRIMARY KEY AUTO_INCREMENT,
+    `user_id`     BIGINT       NOT NULL COMMENT '接收通知的用户ID（谁收到通知）',
+    `from_user_id` BIGINT      NOT NULL COMMENT '触发通知的用户ID（谁触发了通知）',
+    `type`        VARCHAR(20)  NOT NULL COMMENT '通知类型: comment / like / follow',
+    `sub_type`    VARCHAR(20)  DEFAULT NULL COMMENT '子类型: video_like / comment_like / comment_reply',
+    `video_id`    BIGINT       DEFAULT NULL COMMENT '关联的视频ID（评论通知/视频点赞）',
+    `comment_id`  BIGINT       DEFAULT NULL COMMENT '关联的评论ID（评论点赞/评论回复）',
+    `content`     VARCHAR(200) DEFAULT NULL COMMENT '摘要文本（如评论前50字）',
+    `is_read`     TINYINT      DEFAULT 0 COMMENT '0:未读 1:已读',
+    `created_at`  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX `idx_user_read_created` (`user_id`, `is_read`, `created_at`),
+    INDEX `idx_from_user` (`from_user_id`),
+    INDEX `idx_type` (`type`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通知表';
