@@ -17,6 +17,7 @@ import com.vidego.module.user.mapper.UserMapper;
 import com.vidego.module.user.vo.UserVO;
 import com.vidego.module.video.entity.Video;
 import com.vidego.module.video.mapper.VideoMapper;
+import com.vidego.module.notification.mq.NotificationEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,7 @@ public class CommentServiceImpl implements CommentService {
     private final LikeRecordMapper likeRecordMapper;
     private final UserMapper userMapper;
     private final VideoMapper videoMapper;
+    private final NotificationEventPublisher notificationEventPublisher;
 
     private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -133,6 +135,23 @@ public class CommentServiceImpl implements CommentService {
         log.info("Comment created: id={}, videoId={}, userId={}",
                 comment.getId(), videoId, userId);
 
+        // 异步通知：根评论 → 通知视频作者，回复 → 通知父评论作者
+        if (request.getParentId() == null) {
+            Video video = videoMapper.selectById(videoId);
+            if (video != null) {
+                notificationEventPublisher.publishCommentNotification(
+                        video.getUserId(), userId, videoId,
+                        comment.getId(), request.getContent(), false);
+            }
+        } else {
+            Comment parent = commentMapper.selectById(request.getParentId());
+            if (parent != null) {
+                notificationEventPublisher.publishCommentNotification(
+                        parent.getUserId(), userId, videoId,
+                        comment.getId(), request.getContent(), true);
+            }
+        }
+
         // 查询用户信息构建 VO
         User user = userMapper.selectById(userId);
         UserVO userVO = toUserVO(user);
@@ -217,6 +236,14 @@ public class CommentServiceImpl implements CommentService {
 
         commentMapper.incrementLikeCount(commentId);
         log.debug("Comment liked: commentId={}, userId={}", commentId, userId);
+
+        // 异步通知：点赞评论 → 通知评论作者
+        Comment comment = commentMapper.selectById(commentId);
+        if (comment != null) {
+            notificationEventPublisher.publishLikeNotification(
+                    comment.getUserId(), userId, TARGET_TYPE_COMMENT,
+                    commentId, comment.getVideoId());
+        }
     }
 
     @Override

@@ -20,4 +20,8 @@ public class UserVO {
      */
     private Integer role;
     private String createdAt;
+    /**
+     * 当前登录用户是否已关注该用户（未登录时为 false）
+     */
+    private Boolean isFollowing;
 }

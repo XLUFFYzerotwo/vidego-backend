@@ -27,6 +27,7 @@ import com.vidego.module.video.mapper.LikeRecordMapper;
 import com.vidego.module.video.mapper.FavoriteMapper;
 import com.vidego.module.video.entity.Favorite;
 import com.vidego.module.video.mapper.VideoMapper;
+import com.vidego.module.notification.mq.NotificationEventPublisher;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +57,7 @@ public class UserServiceImpl implements UserService {
     private final FavoriteMapper favoriteMapper;
     private final MinioClient minioClient;
     private final MinioConfig minioConfig;
+    private final NotificationEventPublisher notificationEventPublisher;
 
     private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -186,7 +188,18 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
-        return toUserVO(user);
+        UserVO vo = toUserVO(user);
+        // 填充当前登录用户的关注状态
+        Long currentUserId = UserContext.getUserId();
+        if (currentUserId != null && !currentUserId.equals(userId)) {
+            long count = followMapper.selectCount(new LambdaQueryWrapper<Follow>()
+                    .eq(Follow::getFollowerId, currentUserId)
+                    .eq(Follow::getFollowingId, userId));
+            vo.setIsFollowing(count > 0);
+        } else {
+            vo.setIsFollowing(false);
+        }
+        return vo;
     }
 
     @Override
@@ -461,6 +474,9 @@ public class UserServiceImpl implements UserService {
         userMapper.update(null, new LambdaUpdateWrapper<User>()
                 .setSql("follower_count = follower_count + 1").eq(User::getId, targetUserId));
         log.info("User {} followed {}", userId, targetUserId);
+
+        // 异步通知：关注 → 通知被关注者
+        notificationEventPublisher.publishFollowNotification(targetUserId, userId);
     }
 
     @Override
@@ -529,6 +545,20 @@ public class UserServiceImpl implements UserService {
             authorVO.setUsername(author.getUsername());
             authorVO.setNickname(author.getNickname());
             authorVO.setAvatar(author.getAvatar());
+            authorVO.setFollowerCount(author.getFollowerCount());
+            authorVO.setFollowingCount(author.getFollowingCount());
+            authorVO.setVideoCount(author.getVideoCount());
+            authorVO.setBio(author.getBio());
+            // 填充当前登录用户是否已关注该作者
+            Long currentUserId = UserContext.getUserId();
+            if (currentUserId != null && !currentUserId.equals(author.getId())) {
+                authorVO.setIsFollowing(
+                    followMapper.selectCount(new LambdaQueryWrapper<Follow>()
+                        .eq(Follow::getFollowerId, currentUserId)
+                        .eq(Follow::getFollowingId, author.getId())) > 0);
+            } else {
+                authorVO.setIsFollowing(false);
+            }
             vo.setUser(authorVO);
         }
         return vo;

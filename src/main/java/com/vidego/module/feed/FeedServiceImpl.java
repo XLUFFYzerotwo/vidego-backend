@@ -4,10 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vidego.auth.UserContext;
 import com.vidego.common.exception.BusinessException;
 import com.vidego.common.result.ErrorCode;
 import com.vidego.common.result.PageResult;
 import com.vidego.module.user.entity.User;
+import com.vidego.module.user.entity.Follow;
+import com.vidego.module.user.mapper.FollowMapper;
 import com.vidego.module.user.mapper.UserMapper;
 import com.vidego.module.user.vo.UserVO;
 import com.vidego.module.video.dto.VideoVO;
@@ -36,6 +39,7 @@ public class FeedServiceImpl implements FeedService {
 
     private final VideoMapper videoMapper;
     private final UserMapper userMapper;
+    private final FollowMapper followMapper;
     private final TagMapper tagMapper;
     private final VideoTagMapper videoTagMapper;
     private final StringRedisTemplate redisTemplate;
@@ -204,6 +208,20 @@ public class FeedServiceImpl implements FeedService {
             userVO.setUsername(user.getUsername());
             userVO.setNickname(user.getNickname());
             userVO.setAvatar(user.getAvatar());
+            userVO.setFollowerCount(user.getFollowerCount());
+            userVO.setFollowingCount(user.getFollowingCount());
+            userVO.setVideoCount(user.getVideoCount());
+            userVO.setBio(user.getBio());
+            // 填充当前登录用户是否已关注该作者
+            Long currentUserId = com.vidego.auth.UserContext.getUserId();
+            if (currentUserId != null && !currentUserId.equals(user.getId())) {
+                userVO.setIsFollowing(
+                    followMapper.selectCount(new LambdaQueryWrapper<Follow>()
+                        .eq(Follow::getFollowerId, currentUserId)
+                        .eq(Follow::getFollowingId, user.getId())) > 0);
+            } else {
+                userVO.setIsFollowing(false);
+            }
             vo.setUser(userVO);
         }
 

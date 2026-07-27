@@ -12,6 +12,8 @@ import com.vidego.common.result.ErrorCode;
 import com.vidego.common.result.PageResult;
 import com.vidego.module.user.entity.User;
 import com.vidego.module.user.mapper.UserMapper;
+import com.vidego.module.user.entity.Follow;
+import com.vidego.module.user.mapper.FollowMapper;
 import com.vidego.module.user.vo.UserVO;
 import com.vidego.module.video.dto.UploadTokenVO;
 import com.vidego.module.video.dto.VideoCreateRequest;
@@ -27,6 +29,7 @@ import com.vidego.module.video.mapper.FavoriteMapper;
 import com.vidego.module.video.entity.Favorite;
 import com.vidego.module.video.entity.LikeRecord;
 import com.vidego.module.video.mq.VideoEventPublisher;
+import com.vidego.module.notification.mq.NotificationEventPublisher;
 import io.minio.*;
 import io.minio.http.Method;
 import lombok.RequiredArgsConstructor;
@@ -53,11 +56,13 @@ public class VideoServiceImpl implements VideoService {
     private final TagMapper tagMapper;
     private final VideoTagMapper videoTagMapper;
     private final UserMapper userMapper;
+    private final FollowMapper followMapper;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final LikeRecordMapper likeRecordMapper;
     private final FavoriteMapper favoriteMapper;
     private final VideoEventPublisher videoEventPublisher;
+    private final NotificationEventPublisher notificationEventPublisher;
 
     private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -348,6 +353,13 @@ public class VideoServiceImpl implements VideoService {
         videoMapper.incrementLikeCount(videoId);
         redisTemplate.delete(CACHE_VIDEO_PREFIX + videoId);
         log.debug("Video liked: videoId={}, userId={}", videoId, userId);
+
+        // 异步通知：点赞视频 → 通知视频作者
+        Video video = videoMapper.selectById(videoId);
+        if (video != null) {
+            notificationEventPublisher.publishLikeNotification(
+                    video.getUserId(), userId, "video", videoId, videoId);
+        }
     }
 
     @Override
@@ -597,6 +609,20 @@ public class VideoServiceImpl implements VideoService {
             userVO.setUsername(user.getUsername());
             userVO.setNickname(user.getNickname());
             userVO.setAvatar(user.getAvatar());
+            userVO.setFollowerCount(user.getFollowerCount());
+            userVO.setFollowingCount(user.getFollowingCount());
+            userVO.setVideoCount(user.getVideoCount());
+            userVO.setBio(user.getBio());
+            // 填充当前登录用户是否已关注该作者
+            Long currentUserId = UserContext.getUserId();
+            if (currentUserId != null && !currentUserId.equals(user.getId())) {
+                userVO.setIsFollowing(
+                    followMapper.selectCount(new LambdaQueryWrapper<Follow>()
+                        .eq(Follow::getFollowerId, currentUserId)
+                        .eq(Follow::getFollowingId, user.getId())) > 0);
+            } else {
+                userVO.setIsFollowing(false);
+            }
             vo.setUser(userVO);
         }
         return vo;
