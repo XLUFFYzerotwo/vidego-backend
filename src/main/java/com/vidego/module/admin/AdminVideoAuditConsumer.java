@@ -72,9 +72,9 @@ public class AdminVideoAuditConsumer {
 
             ackQuietly(channel, deliveryTag, false);
         } catch (Exception e) {
-            log.error("Video audit failed, requeue for retry: videoId={}", message.getVideoId(), e);
-            // requeue=true 让 MQ 重试；持续失败需配合死信队列兜底
-            nackQuietly(channel, deliveryTag, true);
+            log.error("Video audit failed, routing to DLQ: videoId={}", message.getVideoId(), e);
+            // requeue=false → 消息进入 DLQ（vidego.video.dlx → vidego.video.audit.dlq）
+            nackQuietly(channel, deliveryTag, false);
         }
     }
 
