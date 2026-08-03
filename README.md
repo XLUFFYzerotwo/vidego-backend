@@ -34,6 +34,7 @@
 | 数据库 | MySQL 8.0 | 持久化存储 |
 | 缓存 | Redis 7 | 热点缓存、去重、分布式锁 |
 | 对象存储 | MinIO | 视频、封面、头像文件存储 |
+| 消息队列 | RabbitMQ | 异步解耦（封面生成、视频审核、消息通知） |
 | 认证 | JWT (JJWT 0.12) | 无状态认证、Token 黑名单 |
 | API 文档 | SpringDoc OpenAPI 2.3 | Swagger UI 接口文档 |
 | 部署 | Docker / Docker Compose | 容器化编排 |
@@ -54,7 +55,8 @@
 ### 技术亮点
 - **Redis 多级缓存** — 视频详情缓存 + 分布式锁防击穿 + 空值缓存防穿透
 - **MinIO 预签名 URL** — 前端直传文件不经过后端，分分钟享性能
-- **FFmpeg 管道流** — 封面生成全程内存操作，零磁盘 IO
+- **FFmpeg 管道流** — HTTP 预签名 URL 直连对象存储，封面生成全程内存操作、零磁盘 IO
+- **RabbitMQ 异步解耦** — Topic 交换机 + 多队列 + 独立死信队列，视频创建/通知链路异步化
 - **Hot Score 定时任务** — 3 小时刷新热门权重，排行榜性能从 filesort 降为索引扫描
 - **数据库优化** — 复合索引覆盖核心查询，冗余计数字段避免 COUNT
 - **全局异常处理** — 统一响应格式，业务异常 + 参数校验 + 兜底异常三层拦截
@@ -200,7 +202,10 @@ services:
 通过 `hot_score` 冗余字段将热门排序从 `filesort` 降为索引扫描；复合索引 `idx_status_created` 覆盖首页全部列表查询。
 
 ### 4. 管道流封面生成
-FFmpeg 通过 pipe:0/stdin 直读 MinIO 视频流，输出 JPEG 到 stdout 后直接 PutObject，全程内存操作、零磁盘读写。
+FFmpeg 通过 HTTP 预签名 URL 直连 MinIO 拉取视频流（fast seek + Range 请求，无需下载整文件），输出 JPEG 到 stdout 后直接 PutObject，全程内存操作、零磁盘读写；配合 `waitFor` 超时控制与 `destroyForcibly` 强制销毁，彻底规避进程阻塞与僵尸进程泄漏。
+
+### 5. 事件驱动架构（RabbitMQ）
+基于 RabbitMQ 构建跨模块事件总线：视频创建后向 `vidego.video.topic` 发送一次 `video.created` 事件，通过 Topic 路由同时分发到封面生成（3-5 并发消费者）与内容审核两个独立队列，将 `createVideo` 接口从同步数秒降至百毫秒级返回；评论/点赞/关注事件通过 `vidego.notification.topic` 分别路由到三类通知队列，消费者以"DB 持久化成功才 ACK + WebSocket 推送仅记日志"的硬软依赖分阶段处理，兼顾一致性与容错。每条主队列配套独立死信交换机与 DLQ，失败消息 `basicNack(requeue=false)` 进入 DLQ 暂存，避免丢失与死循环；通知消费者基于 `(userId, fromUserId, type, targetId)` 做幂等去重，配合 Jackson JSON 消息体与 `mandatory=true` 发布确认，构建端到端可靠投递链路。
 
 ## 项目截图
 ### 1. 登录页面
