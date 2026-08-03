@@ -78,6 +78,7 @@ public class VideoServiceImpl implements VideoService {
     // ── Redis Key 前缀 ──
     private static final String CACHE_VIDEO_PREFIX = "vidego:cache:video:";
     private static final String VIEW_SET_PREFIX = "vidego:views:set:";
+    private static final String VIEW_COUNTER_PREFIX = "vidego:views:counter:";
     private static final String CACHE_HOT_PREFIX = "vidego:cache:hot:videos";
     //分布式锁
     private static final String LOCK_VIDEO_PREFIX = "vidego:lock:video:";
@@ -191,7 +192,10 @@ public class VideoServiceImpl implements VideoService {
                 throw new BusinessException(ErrorCode.VIDEO_NOT_FOUND);
             }
             try {
-                return objectMapper.readValue(cached, VideoVO.class);
+                VideoVO vo = objectMapper.readValue(cached, VideoVO.class);
+                // 叠加 Redis counter 中尚未刷入 DB 的增量
+                vo.setViewCount(vo.getViewCount() + getPendingViewCount(videoId));
+                return vo;
             } catch (JsonProcessingException e) {
                 log.warn("Failed to deserialize video cache, id={}", videoId, e);
                 redisTemplate.delete(cacheKey);
@@ -259,9 +263,11 @@ public class VideoServiceImpl implements VideoService {
 
         Long added = redisTemplate.opsForSet().add(setKey, viewerId);
         if (added != null && added > 0) {
-            // 新观看，设置 TTL 并更新数据库
+            // 新观看，设置 TTL
             redisTemplate.expire(setKey, VIEW_SET_TTL, TimeUnit.SECONDS);
-            videoMapper.incrementViewCount(videoId);
+
+            // Redis INCR 聚合，由 ViewCountSyncTask 定时批量刷入 DB
+            redisTemplate.opsForValue().increment(VIEW_COUNTER_PREFIX + videoId);
 
             // 使缓存中的播放量失效，下次请求重新加载
             redisTemplate.delete(CACHE_VIDEO_PREFIX + videoId);
@@ -583,6 +589,15 @@ public class VideoServiceImpl implements VideoService {
         return (dot == -1) ? null : filename.substring(dot + 1);
     }
 
+    /**
+     * 查询 Redis 中尚未刷入 DB 的播放增量。
+     */
+    private int getPendingViewCount(Long videoId) {
+        String counterKey = VIEW_COUNTER_PREFIX + videoId;
+        String delta = redisTemplate.opsForValue().get(counterKey);
+        return delta != null ? Integer.parseInt(delta) : 0;
+    }
+
     private VideoVO toVideoVO(Video video) {
         VideoVO vo = new VideoVO();
         vo.setId(video.getId());
@@ -596,7 +611,7 @@ public class VideoServiceImpl implements VideoService {
         vo.setStatus(video.getStatus());
         vo.setAuditStatus(video.getAuditStatus());
         vo.setAuditReason(video.getAuditReason());
-        vo.setViewCount(video.getViewCount());
+        vo.setViewCount(video.getViewCount() + getPendingViewCount(video.getId()));
         vo.setLikeCount(video.getLikeCount());
         vo.setCommentCount(video.getCommentCount());
         vo.setCreatedAt(video.getCreatedAt() != null ? video.getCreatedAt().format(DTF) : null);

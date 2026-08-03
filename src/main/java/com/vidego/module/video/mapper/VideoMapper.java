@@ -13,10 +13,16 @@ import java.util.List;
 public interface VideoMapper extends BaseMapper<Video> {
 
     /**
-     * 原子增加播放量
+     * 原子增加播放量（+1，用于点赞等其他场景）
      */
-    @Update("UPDATE video SET view_count = view_count + 1 WHERE id = #{videoId}")
-    int incrementViewCount(@Param("videoId") Long videoId);
+//    @Update("UPDATE video SET view_count = view_count + 1 WHERE id = #{videoId}")
+//    int incrementViewCount(@Param("videoId") Long videoId);
+
+    /**
+     * 原子增加指定数量的播放量（用于定时任务批量刷入 Redis 聚合后的增量）
+     */
+    @Update("UPDATE video SET view_count = view_count + #{delta} WHERE id = #{videoId}")
+    int incrementViewCount(@Param("videoId") Long videoId, @Param("delta") int delta);
 
     /**
      * 原子增加点赞数
